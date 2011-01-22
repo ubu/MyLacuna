@@ -14,6 +14,7 @@ my $do_help = undef;
 GetOptions(
     'conf=s'      => \$conf{config_file},
     'bodyfile=s'  => \$conf{body_file},
+    'excavatedfile=s'  => \$conf{excavated_file},
     'furthest'    => \$conf{furthest_first},
     'help'    => \$do_help,
 );
@@ -28,7 +29,26 @@ my $lacuna = Games::Lacuna::Client->new(
 
 my $empire  = $lacuna->empire->get_status->{empire};
 
+my $excavated_bodies = [];
+
 my $body_data = YAML::Any::LoadFile( $conf{body_file} ) || die "Couldn't load body data from YAML file $conf{body_file}";
+
+if ( defined( $conf{excavated_file}) && -f $conf{excavated_file} ) {
+    $excavated_bodies = YAML::Any::LoadFile( $conf{excavated_file} )
+}
+
+# cull the list of available bodies to keep the number of API calls to a dull roar.
+
+if ( scalar( @{$excavated_bodies} )) {
+    my @temp = ();
+    foreach my $body ( @{$body_data} ) {
+        next if grep { $_ == $body->{id} } @{$excavated_bodies};
+        push @temp, $body;
+    }
+    $body_data = \@temp;
+}
+
+die "No bodies available to excavate. Probe more stars!\n" unless scalar( @{$body_data} );
 
 foreach my $planet_id ( keys %{ $empire->{planets} } ) {
     my $planet    = $lacuna->body( id => $planet_id );
@@ -63,6 +83,7 @@ foreach my $planet_id ( keys %{ $empire->{planets} } ) {
 
                 if ( $excavator ) {
                     $spaceport->send_ship( $excavator->{id}, { body_id => $pair->[1] } );
+                    push @{$excavated_bodies}, $pair->[1];
                     last;
                 }
             }
@@ -94,6 +115,10 @@ foreach my $planet_id ( keys %{ $empire->{planets} } ) {
 
 }
 
+if ( defined( $conf{excavated_file}) && -f $conf{excavated_file} ) {
+    YAML::Any::DumpFile($conf{excavated_file}, $excavated_bodies );
+}
+
 sub distance_map {
     my $from_planet = shift;
     my $body_list = shift;
@@ -121,9 +146,12 @@ sub distance_map {
 sub usage {
   die <<"END_USAGE";
 Usage: $0 [options]
-       --conf       The path to your empire's YAML config file.
-       --bodyfile   Path to the YAML file holding the list of avialable bodies.
-       --furthest   Send excavators to the furthest available body
-                    (default is nearest)
+       --conf           The path to your empire's YAML config file.
+       --bodyfile       Path to the YAML file holding the list of available
+                        bodies.
+       --excavatedfile  Path to the YAML file holding the list of previously
+                        excavated bodies.
+       --furthest       Send excavators to the furthest available body
+                        (default is nearest)
 END_USAGE
 }
